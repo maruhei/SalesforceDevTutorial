@@ -200,6 +200,11 @@ private class ApexSampleMaruTest {
     }
 }
 ~~~
+**テストコードの編集ポイント**
+完全にコピペして実行すると、ApexSampleMaruというクラスのテストになってしまうため修正が必要。
+①public with sharing class...→private class...
+②各テストメソッド内のテスト対象のインスタンス化部分を、自分が作成したクラスに変更
+
 
 **テストコード解説**
 |内容|補足|
