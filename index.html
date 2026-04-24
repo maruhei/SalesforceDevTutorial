@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>資格取得状況ダッシュボード</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ヘッダー -->
+  <header class="app-header">
+    <h1>{{ DISPLAY_CONFIG.title }}</h1>
+    <span class="org-badge">{{ DISPLAY_CONFIG.organization }}</span>
+    <span v-if="records.length" style="margin-left:auto;font-size:12px;color:var(--text2);">
+      {{ records.length }}件 読み込み済み
+    </span>
+  </header>
+
+  <main class="app-body">
+
+    <!-- CSV アップロードエリア -->
+    <div
+      class="upload-area"
+      :class="{ dragging: isDragging }"
+      @dragover.prevent="isDragging = true"
+      @dragleave="isDragging = false"
+      @drop.prevent="onDrop"
+      style="margin-bottom: 20px;"
+    >
+      <div class="upload-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text2);">
+          <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12M8 8l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="upload-label">CSVファイルをドロップ</div>
+      <div class="upload-sub">または</div>
+      <label class="upload-btn">
+        ファイルを選択
+        <input type="file" accept=".csv" @change="onFileInput" />
+      </label>
+      <div class="upload-sub" style="margin-top:8px;">
+        Shift-JIS / UTF-8 どちらにも対応しています
+      </div>
+    </div>
+
+    <div v-if="errorMsg" class="error-msg">{{ errorMsg }}</div>
+
+    <!-- データなし -->
+    <div v-if="!records.length" class="dashboard">
+      <div class="empty-state">
+        <div class="empty-title">CSVを読み込んでください</div>
+        <div class="empty-sub">資格取得履歴のCSVをアップロードするとダッシュボードが表示されます</div>
+      </div>
+    </div>
+
+    <!-- ダッシュボード本体 -->
+    <div v-else class="dashboard">
+
+      <!-- タブ -->
+      <div class="tab-bar">
+        <button class="tab-btn" :class="{active: activeTab==='overview'}" @click="activeTab='overview'">全体サマリー</button>
+        <button class="tab-btn" :class="{active: activeTab==='trend'}"    @click="activeTab='trend'">年度別トレンド</button>
+        <button class="tab-btn" :class="{active: activeTab==='age'}"      @click="activeTab='age'">年齢層別</button>
+        <button class="tab-btn" :class="{active: activeTab==='level'}"    @click="activeTab='level'">難易度別推移</button>
+        <button class="tab-btn" :class="{active: activeTab==='gap'}"      @click="activeTab='gap'">空白・ステップ</button>
+      </div>
+
+      <!-- ===== 全体サマリー ===== -->
+      <div v-show="activeTab === 'overview'">
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-val">{{ totalCerts }}</div>
+            <div class="metric-lbl">総取得資格数</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">{{ memberCount }}</div>
+            <div class="metric-lbl">メンバー数</div>
+            <div class="metric-sub" style="color:var(--text2);">平均 {{ avgPerMember }}資格/人</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">{{ recentYearCount }}</div>
+            <div class="metric-lbl">直近2年の取得数</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val">{{ categorySummary.length }}</div>
+            <div class="metric-lbl">取得カテゴリ数</div>
+          </div>
+        </div>
+
+        <div class="chart-grid-2">
+          <!-- カテゴリ別構成 -->
+          <div>
+            <div class="chart-title">カテゴリ別 保有構成</div>
+            <div class="chart-wrap" style="height:200px;">
+              <canvas id="chart-donut" role="img" aria-label="資格カテゴリ別ドーナツチャート"></canvas>
+            </div>
+            <div class="legend" style="margin-top:10px;">
+              <span v-for="c in categorySummary" :key="c.key" class="legend-item">
+                <span class="legend-dot" :style="{background: c.color}"></span>
+                {{ c.label }} {{ c.pct }}%
+              </span>
+            </div>
+          </div>
+
+          <!-- メンバー別保有数 -->
+          <div>
+            <div class="chart-title">メンバー別 保有数</div>
+            <div class="chart-wrap" :style="{height: Math.max(160, memberSummary.length * 28 + 60) + 'px'}">
+              <canvas id="chart-member-bar" role="img" aria-label="メンバー別資格保有数"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- カテゴリバー -->
+        <div style="margin-top:20px;">
+          <div class="chart-title">カテゴリ別 内訳</div>
+          <div v-for="c in categorySummary" :key="c.key" class="cat-bar-row">
+            <div class="cat-bar-label">
+              <span>{{ c.label }}</span>
+              <span>{{ c.count }}件 ({{ c.pct }}%)</span>
+            </div>
+            <div class="cat-bar-track">
+              <div class="cat-bar-fill" :style="{width: c.pct + '%', background: c.color}"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 年度別トレンド ===== -->
+      <div v-show="activeTab === 'trend'">
+        <div class="chart-title">年度別 資格取得数の推移</div>
+        <div class="insight-box" style="margin-bottom:14px;">
+          赤いバーは直近（前年以降）のデータです。期中のため件数が少ない場合があります。
+        </div>
+        <div class="chart-wrap" style="height:280px;">
+          <canvas id="chart-trend" role="img" aria-label="年度別資格取得数推移棒グラフ"></canvas>
+        </div>
+      </div>
+
+      <!-- ===== 年齢層別 ===== -->
+      <div v-show="activeTab === 'age'">
+        <div class="chart-title">年齢層別 × 年度別 取得数（積み上げ）</div>
+        <div class="legend" style="margin-bottom:12px;">
+          <span v-for="g in AGE_GROUPS" :key="g.key" class="legend-item">
+            <span class="legend-dot" :style="{background: g.color}"></span>
+            {{ g.label }}
+          </span>
+        </div>
+        <div class="chart-wrap" style="height:280px;">
+          <canvas id="chart-age" role="img" aria-label="年齢層別積み上げ棒グラフ"></canvas>
+        </div>
+        <div class="insight-box">
+          中堅層の取得数が減少している場合、入社後の動機づけの機能不全が疑われます。
+          若手は入社時に集中取得するケースが多く、その後継続できているかを合わせて確認してください。
+        </div>
+      </div>
+
+      <!-- ===== 難易度別推移 ===== -->
+      <div v-show="activeTab === 'level'">
+        <div class="filter-row">
+          <span class="filter-label">カテゴリ：</span>
+          <select class="filter-select" v-model="selectedDiffCat">
+            <option
+              v-for="cat in CERT_CATEGORIES.filter(c => DIFFICULTY_CONFIG[c.key])"
+              :key="cat.key"
+              :value="cat.key"
+            >{{ cat.label }}</option>
+          </select>
+        </div>
+        <div class="chart-title">難易度別 取得数の推移</div>
+        <div class="legend" style="margin-bottom:12px;">
+          <span
+            v-for="lv in (DIFFICULTY_CONFIG[selectedDiffCat]?.levels || [])"
+            :key="lv.key"
+            class="legend-item"
+          >
+            <span class="legend-dot" :style="{background: lv.color}"></span>
+            {{ lv.label }}
+          </span>
+        </div>
+        <div class="chart-wrap" style="height:260px;">
+          <canvas id="chart-level" role="img" aria-label="難易度別取得数推移積み上げ棒グラフ"></canvas>
+        </div>
+        <div class="insight-box">{{ currentLevelInsight }}</div>
+      </div>
+
+      <!-- ===== 空白・ステップ分析 ===== -->
+      <div v-show="activeTab === 'gap'">
+        <div class="chart-grid-2">
+
+          <!-- ヒートマップ -->
+          <div>
+            <div class="chart-title">空白マップ（カテゴリ × メンバー）</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:8px;">濃色 = 保有あり　薄色 = 空白</div>
+            <table class="heatmap-table">
+              <thead>
+                <tr>
+                  <th style="width:64px;"></th>
+                  <th
+                    v-for="id in members"
+                    :key="id"
+                    class="hm-member-label"
+                  >{{ id.slice(-3) }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="cat in heatmapData" :key="cat.key">
+                  <td class="hm-cat-label">{{ cat.label }}</td>
+                  <td
+                    v-for="(count, mi) in cat.memberCounts"
+                    :key="mi"
+                    class="hm-cell"
+                    :style="{
+                      background: heatColor(cat.color, count, maxCountInCat(cat)).bg,
+                      opacity:    heatColor(cat.color, count, maxCountInCat(cat)).opacity,
+                    }"
+                    :title="`${cat.label}: ${count}件`"
+                  >{{ count || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- ステップ移行率 -->
+          <div>
+            <div class="chart-title">資格ステップ移行率</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:10px;">
+              初級取得者のうち上位資格に進んだ割合
+            </div>
+            <div class="legend" style="margin-bottom:10px;">
+              <span class="legend-item"><span class="legend-dot" style="background:#D3D1C7;"></span>初級止まり</span>
+              <span class="legend-item"><span class="legend-dot" style="background:#378ADD;"></span>上位移行済み</span>
+            </div>
+            <div class="chart-wrap" :style="{height: Math.max(160, stepData.length * 44 + 60) + 'px'}">
+              <canvas id="chart-step" role="img" aria-label="資格ステップ移行率横棒グラフ"></canvas>
+            </div>
+            <div class="insight-box" style="margin-top:12px;">
+              移行率が低いカテゴリは「取り切れていない」ではなく
+              「上位資格へのルートが見えていない」可能性があります。
+              目標資格とロードマップの提示が有効です。
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /dashboard -->
+  </main>
+</div>
+
+<!-- Vue 3 CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+<!-- Chart.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- アプリ本体（ES modules） -->
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
